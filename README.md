@@ -2,7 +2,7 @@
 
 A high-performance, distributed key-value store implemented in Rust, leveraging the Raft consensus algorithm for strong consistency and fault tolerance. This project serves as a robust implementation of distributed systems principles, providing a reliable storage layer across a cluster of nodes.
 
-## Design Philosophy
+## Design
 
 The system is designed with several core principles in mind:
 - Strong Consistency: All read and write operations follow the Raft consensus model to ensure a linearizable state across the cluster.
