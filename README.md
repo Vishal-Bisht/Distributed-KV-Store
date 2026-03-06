@@ -67,7 +67,7 @@ We use a randomized election timeout (between 150ms and 300ms) to minimize the c
 Ensure you have the latest stable version of Rust installed.
 
 ```bash
-https://github.com/Vishal-Bisht/Distributed-KV-Store.git
+git clone https://github.com/Vishal-Bisht/Distributed-KV-Store.git
 cd distributed-KV-Store-rust
 cargo build --release
 ```
