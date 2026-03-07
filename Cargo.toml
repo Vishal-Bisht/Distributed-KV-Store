@@ -3,6 +3,10 @@ name = "kvstore-rust"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "kvstore_rust"
+path = "src/lib.rs"
+
 [[bin]]
 name = "kv"
 path = "src/main.rs"
