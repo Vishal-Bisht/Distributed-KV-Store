@@ -2,6 +2,17 @@
 
 A high-performance, distributed key-value store implemented in Rust, leveraging the Raft consensus algorithm for strong consistency and fault tolerance. This project serves as a robust implementation of distributed systems principles, providing a reliable storage layer across a cluster of nodes.
 
+## Quick Reference
+
+| Command | Description |
+|---------|-------------|
+| `.\start-node.bat 1` | Start node 1 (also 2, 3) |
+| `.\target\release\kv.exe -i 1 -a 127.0.0.1:8001 -p ...` | Start server manually |
+| `.\target\release\kvc.exe put key "value"` | Store a value |
+| `.\target\release\kvc.exe get key` | Retrieve a value |
+| `.\target\release\kvc.exe delete key` | Delete a key |
+| `.\target\release\kvc.exe -a 127.0.0.1:8002 get key` | Query specific node |
+
 ## Design
 
 The system is designed with several core principles in mind:
@@ -73,47 +84,83 @@ cargo build --release
 ```
 
 ### Running a Cluster
+
+#### Quick Start (Windows)
+Use the helper script to start nodes easily:
+
+```powershell
+# Terminal 1
+.\start-node.bat 1
+
+# Terminal 2
+.\start-node.bat 2
+
+# Terminal 3
+.\start-node.bat 3
+```
+
+#### Manual Start
 To simulate a 3-node cluster locally, open three terminals and run the following commands:
 
 ```bash
-# Node 1
-cargo run --release -- --id 1 --addr 127.0.0.1:8001 --peers 127.0.0.1:8002,127.0.0.1:8003
+# Node 1 (short flags: -i = id, -a = addr, -p = peers)
+.\target\release\kv.exe -i 1 -a 127.0.0.1:8001 -p 127.0.0.1:8002,127.0.0.1:8003
 
 # Node 2
-cargo run --release -- --id 2 --addr 127.0.0.1:8002 --peers 127.0.0.1:8001,127.0.0.1:8003
+.\target\release\kv.exe -i 2 -a 127.0.0.1:8002 -p 127.0.0.1:8001,127.0.0.1:8003
 
 # Node 3
-cargo run --release -- --id 3 --addr 127.0.0.1:8003 --peers 127.0.0.1:8001,127.0.0.1:8002
+.\target\release\kv.exe -i 3 -a 127.0.0.1:8003 -p 127.0.0.1:8001,127.0.0.1:8002
 ```
 
-For a 2-node cluster across different machines:
+For a cluster across different machines:
 ```bash
-# Machine 1
-cargo run --release -- --id 1 --addr 0.0.0.0:8001 --peers <machine2-ip>:8002
+# Machine 1 (IP: 192.168.1.10)
+.\target\release\kv.exe -i 1 -a 0.0.0.0:8001 -p 192.168.1.20:8001,192.168.1.30:8001
 
-# Machine 2
-cargo run --release -- --id 2 --addr 0.0.0.0:8002 --peers <machine1-ip>:8001
+# Machine 2 (IP: 192.168.1.20)
+.\target\release\kv.exe -i 2 -a 0.0.0.0:8001 -p 192.168.1.10:8001,192.168.1.30:8001
+
+# Machine 3 (IP: 192.168.1.30)
+.\target\release\kv.exe -i 3 -a 0.0.0.0:8001 -p 192.168.1.10:8001,192.168.1.20:8001
 ```
 
 ### Using the CLI Client
 
-The project includes a CLI client (`kvclient`) for interacting with the cluster:
+The project includes a CLI client (`kvc`) for interacting with the cluster:
 
 ```bash
-# Build the client
-cargo build --release --bin kvclient
-
-# Store a key-value pair (connects to leader)
-./target/release/kvclient --addr 127.0.0.1:8001 put mykey "hello world"
+# Store a key-value pair (default connects to 127.0.0.1:8001)
+.\target\release\kvc.exe put mykey "hello world"
+.\target\release\kvc.exe p mykey "hello world"    # alias
 
 # Retrieve a value
-./target/release/kvclient --addr 127.0.0.1:8001 get mykey
+.\target\release\kvc.exe get mykey
+.\target\release\kvc.exe g mykey                   # alias
 
 # Delete a key
-./target/release/kvclient --addr 127.0.0.1:8001 delete mykey
+.\target\release\kvc.exe delete mykey
+.\target\release\kvc.exe d mykey                   # short alias
+
+# Connect to a different node
+.\target\release\kvc.exe -a 127.0.0.1:8002 get mykey
 ```
 
-**Note:** Write operations (`put`, `delete`) must be sent to the leader node. If you receive a "not leader" error, try connecting to a different node in the cluster.
+**Note:** Write operations (`put`, `delete`) must be sent to the leader node. If you receive a "Not leader" error, try connecting to a different node in the cluster.
+
+### Debug Mode
+
+To see detailed election and replication logs:
+
+```powershell
+# Windows
+$env:RUST_LOG="debug"; .\target\release\kv.exe -i 1 -a 127.0.0.1:8001 -p 127.0.0.1:8002,127.0.0.1:8003
+
+# Linux/Mac
+RUST_LOG=debug ./target/release/kv -i 1 -a 127.0.0.1:8001 -p 127.0.0.1:8002,127.0.0.1:8003
+```
+
+Log levels: `error`, `info`, `debug`
 
 ## Testing
 
