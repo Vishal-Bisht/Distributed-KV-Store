@@ -136,11 +136,11 @@ The project includes a CLI client (`kvc`) for interacting with the cluster:
 
 # Retrieve a value
 .\target\release\kvc.exe get mykey
-.\target\release\kvc.exe g mykey                   # alias
+.\target\release\kvc.exe g mykey                   
 
 # Delete a key
 .\target\release\kvc.exe delete mykey
-.\target\release\kvc.exe d mykey                   # short alias
+.\target\release\kvc.exe d mykey
 
 # Connect to a different node
 .\target\release\kvc.exe -a 127.0.0.1:8002 get mykey
@@ -174,3 +174,70 @@ Key test areas:
 - Storage Atomicity: Ensuring `MemoryStorage` handles concurrent updates correctly.
 - Election Convergence: Testing that a cluster of nodes can successfully elect a leader.
 - Heartbeat Recovery: Verifying that followers correctly reset their election timers upon receiving leader heartbeats.
+
+## Advanced Features
+
+### Persistence
+
+The system automatically persists Raft state to disk, ensuring data survives node restarts:
+
+- **State File**: `data/node_{id}/state.json` - Contains current term, voted_for, and log entries
+- **Snapshot File**: `data/node_{id}/snapshot.json` - Contains compacted state machine snapshot
+
+Data is persisted on:
+- Term changes (elections)
+- Vote grants
+- Log appends (both leader and follower)
+
+On startup, nodes automatically load their persisted state and snapshots, allowing seamless cluster recovery.
+
+### Log Compaction
+
+To prevent unbounded log growth, the system implements automatic log compaction:
+
+- When the log exceeds 100 entries and has applied entries, a snapshot is created
+- The snapshot captures all current key-value data from storage
+- The log is truncated to remove entries included in the snapshot
+- Snapshots are checked every ~5 seconds
+
+### Auto Leader Redirect
+
+Clients automatically handle leader redirection:
+
+- When a write operation is sent to a follower, it returns a `Redirect` response with the leader's address
+- The CLI client automatically retries the request with the correct leader (up to 3 times)
+- This provides a seamless user experience without manually tracking the leader
+
+```bash
+# Works even if node 2 is not the leader - automatically redirects
+.\target\release\kvc.exe -a 127.0.0.1:8002 put key value
+```
+
+## Project Structure
+
+```
+src/
+├── main.rs        # Server entry point
+├── lib.rs         # Library exports
+├── storage.rs     # Storage trait and MemoryStorage
+├── network.rs     # TCP server, messages, and RPC handling
+├── client.rs      # Client library for programmatic access
+├── persist.rs     # Persistence layer (state & snapshots)
+├── bin/
+│   └── client.rs  # CLI client (kvc)
+└── raft/
+    ├── mod.rs     # Core Raft consensus implementation
+    └── tests.rs   # Raft unit tests
+
+data/              # Auto-created persistence directory
+└── node_{id}/
+    ├── state.json
+    └── snapshot.json
+```
+
+## Future Enhancements
+
+- **InstallSnapshot RPC**: Allow leaders to send snapshots to far-behind followers
+- **Membership Changes**: Support dynamic cluster reconfiguration
+- **Batched Writes**: Group multiple client requests for better throughput
+- **Read-Only Optimization**: Serve reads from followers with leader lease
