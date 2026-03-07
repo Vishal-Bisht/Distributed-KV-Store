@@ -2,6 +2,7 @@ mod storage;
 mod network;
 mod client;
 mod raft;
+mod persist;
 
 use clap::Parser;
 use std::sync::Arc;
@@ -26,7 +27,7 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let storage = Arc::new(MemoryStorage::new());
     let mut peer_senders: HashMap<u64, mpsc::Sender<RaftMessage>> = HashMap::new();
-    let mut peer_addrs: HashMap<u64, String> = HashMap::new();
+    let mut peer_addresses: HashMap<u64, String> = HashMap::new();
     let mut peer_ids = Vec::new();
     
     // Assign peer IDs based on position, skipping our own ID
@@ -39,7 +40,7 @@ async fn main() -> anyhow::Result<()> {
         let peer_id = peer_id_counter;
         let (tx, mut rx) = mpsc::channel::<RaftMessage>(100);
         peer_senders.insert(peer_id, tx);
-        peer_addrs.insert(peer_id, peer_addr.clone());
+        peer_addresses.insert(peer_id, peer_addr.clone());
         peer_ids.push(peer_id);
         let addr = peer_addr.clone();
         tokio::spawn(async move {
@@ -52,13 +53,14 @@ async fn main() -> anyhow::Result<()> {
         peer_id_counter += 1;
     }
     
-    let raft = Arc::new(Raft::new(
-        args.id,
-        peer_ids,
-        peer_senders,
-        peer_addrs,
-        args.addr.clone(),
+    let raft = Arc::new(Raft::new_with_persistence(
+        args.id, 
+        peer_ids, 
+        peer_senders, 
+        peer_addresses, 
+        args.addr.clone(), 
         Arc::clone(&storage),
+        true, // Enable persistence
     ));
     let server = Server::new(storage, args.addr, Arc::clone(&raft));
     server.run().await?;
