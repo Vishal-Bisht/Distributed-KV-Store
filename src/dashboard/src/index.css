@@ -1,0 +1,220 @@
+@import "tailwindcss";
+
+/* Custom dark theme for distributed systems vibe */
+:root {
+  --bg-primary: #0a0e17;
+  --bg-secondary: #111827;
+  --bg-card: #1a1f2e;
+  --border-color: #2d3748;
+  --text-primary: #e2e8f0;
+  --text-secondary: #94a3b8;
+  --accent-green: #10b981;
+  --accent-blue: #3b82f6;
+  --accent-purple: #8b5cf6;
+  --accent-orange: #f59e0b;
+  --accent-red: #ef4444;
+}
+
+*,
+*::before,
+*::after {
+  margin: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-height: 100vh;
+  height: 100%;
+}
+
+body {
+  font-family:
+    "Inter",
+    "SF Pro Display",
+    -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
+  background: linear-gradient(135deg, #0a0e17 0%, #1a1f2e 50%, #0f172a 100%);
+  background-attachment: fixed;
+  color: var(--text-primary);
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Custom scrollbar for dark theme */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgb(31 41 55 / 0.5);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgb(75 85 99 / 0.7);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(107 114 128 / 0.8);
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Leader node pulse animation */
+.leader-pulse {
+  animation: leaderPulse 2s ease-in-out infinite;
+}
+
+@keyframes leaderPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(16 185 129 / 0.4);
+  }
+  50% {
+    box-shadow: 0 0 20px 4px rgb(16 185 129 / 0.2);
+  }
+}
+
+/* Card hover effect */
+.card-hover {
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px -5px rgb(0 0 0 / 0.3);
+}
+
+/* Data flow line animation for network topology */
+.data-flow-line {
+  stroke-dasharray: 8, 4;
+  animation: dataFlow 1s linear infinite;
+}
+
+@keyframes dataFlow {
+  to {
+    stroke-dashoffset: -12;
+  }
+}
+
+/* Focus styles */
+input:focus,
+textarea:focus,
+button:focus-visible {
+  outline: none;
+  ring: 2px;
+  ring-color: rgb(59 130 246 / 0.5);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #4a5568;
+}
+
+/* Glow effects */
+.glow-green {
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.3);
+}
+
+.glow-blue {
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
+}
+
+.glow-purple {
+  box-shadow: 0 0 20px rgba(139, 92, 246, 0.3);
+}
+
+/* Animated gradient border */
+.gradient-border {
+  position: relative;
+  background: var(--bg-card);
+  border-radius: 12px;
+}
+
+.gradient-border::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: 13px;
+  padding: 1px;
+  background: linear-gradient(135deg, #3b82f6, #8b5cf6, #10b981);
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0.5;
+}
+
+/* Pulse animation for leader node */
+@keyframes pulse-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 20px rgba(16, 185, 129, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 40px rgba(16, 185, 129, 0.6);
+  }
+}
+
+.leader-pulse {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* Network lines animation */
+@keyframes data-flow {
+  0% {
+    stroke-dashoffset: 100;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+.data-flow-line {
+  stroke-dasharray: 10 5;
+  animation: data-flow 1s linear infinite;
+}
+
+/* Card hover effect */
+.card-hover {
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+}
