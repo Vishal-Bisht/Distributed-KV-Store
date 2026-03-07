@@ -77,14 +77,43 @@ To simulate a 3-node cluster locally, open three terminals and run the following
 
 ```bash
 # Node 1
-cargo run -- --id 1 --addr 127.0.0.1:8001 --peers 127.0.0.1:8002,127.0.0.1:8003
+cargo run --release -- --id 1 --addr 127.0.0.1:8001 --peers 127.0.0.1:8002,127.0.0.1:8003
 
 # Node 2
-cargo run -- --id 2 --addr 127.0.0.1:8002 --peers 127.0.0.1:8001,127.0.0.1:8003
+cargo run --release -- --id 2 --addr 127.0.0.1:8002 --peers 127.0.0.1:8001,127.0.0.1:8003
 
 # Node 3
-cargo run -- --id 3 --addr 127.0.0.1:8003 --peers 127.0.0.1:8001,127.0.0.1:8002
+cargo run --release -- --id 3 --addr 127.0.0.1:8003 --peers 127.0.0.1:8001,127.0.0.1:8002
 ```
+
+For a 2-node cluster across different machines:
+```bash
+# Machine 1
+cargo run --release -- --id 1 --addr 0.0.0.0:8001 --peers <machine2-ip>:8002
+
+# Machine 2
+cargo run --release -- --id 2 --addr 0.0.0.0:8002 --peers <machine1-ip>:8001
+```
+
+### Using the CLI Client
+
+The project includes a CLI client (`kvclient`) for interacting with the cluster:
+
+```bash
+# Build the client
+cargo build --release --bin kvclient
+
+# Store a key-value pair (connects to leader)
+./target/release/kvclient --addr 127.0.0.1:8001 put mykey "hello world"
+
+# Retrieve a value
+./target/release/kvclient --addr 127.0.0.1:8001 get mykey
+
+# Delete a key
+./target/release/kvclient --addr 127.0.0.1:8001 delete mykey
+```
+
+**Note:** Write operations (`put`, `delete`) must be sent to the leader node. If you receive a "not leader" error, try connecting to a different node in the cluster.
 
 ## Testing
 
