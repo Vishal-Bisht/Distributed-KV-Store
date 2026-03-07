@@ -75,9 +75,9 @@ pub fn create_router<S: Storage + 'static>(state: Arc<AppState<S>>) -> Router {
     Router::new()
         .route("/api/status", get(get_status))
         .route("/api/keys", get(get_all_keys))
-        .route("/api/kv/{key}", get(get_key))
-        .route("/api/kv/{key}", post(put_key))
-        .route("/api/kv/{key}", delete(delete_key))
+        .route("/api/kv/:key", get(get_key))
+        .route("/api/kv/:key", post(put_key))
+        .route("/api/kv/:key", delete(delete_key))
         .layer(cors)
         .with_state(state)
 }
