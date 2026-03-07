@@ -68,7 +68,7 @@ Ensure you have the latest stable version of Rust installed.
 
 ```bash
 git clone https://github.com/Vishal-Bisht/Distributed-KV-Store.git
-cd distributed-KV-Store-rust
+cd "Distributed KV Store"
 cargo build --release
 ```
 
