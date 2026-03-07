@@ -3,12 +3,15 @@ mod network;
 mod client;
 mod raft;
 mod persist;
+mod http_api;
 
 use clap::Parser;
 use std::sync::Arc;
+use std::net::SocketAddr;
 use crate::storage::MemoryStorage;
 use crate::network::Server;
 use crate::raft::Raft;
+use crate::http_api::{create_router, AppState};
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 use crate::network::RaftMessage;
@@ -55,13 +58,37 @@ async fn main() -> anyhow::Result<()> {
     
     let raft = Arc::new(Raft::new_with_persistence(
         args.id, 
-        peer_ids, 
+        peer_ids.clone(), 
         peer_senders, 
         peer_addresses, 
         args.addr.clone(), 
         Arc::clone(&storage),
         true, // Enable persistence
     ));
+
+    // Start HTTP API server on port + 1000 (e.g., 8001 -> 9001)
+    let http_port = args.addr.split(':').last()
+        .and_then(|p| p.parse::<u16>().ok())
+        .unwrap_or(8001) + 1000;
+    let http_addr: SocketAddr = format!("0.0.0.0:{}", http_port).parse().unwrap();
+    
+    let app_state = Arc::new(AppState {
+        raft: Arc::clone(&raft),
+        storage: Arc::clone(&storage),
+        node_id: args.id,
+        addr: args.addr.clone(),
+        peers: args.peers.clone(),
+    });
+    
+    let router = create_router(app_state);
+    println!("HTTP API listening on http://{}", http_addr);
+    
+    // Spawn HTTP server
+    tokio::spawn(async move {
+        let listener = tokio::net::TcpListener::bind(http_addr).await.unwrap();
+        axum::serve(listener, router).await.unwrap();
+    });
+
     let server = Server::new(storage, args.addr, Arc::clone(&raft));
     server.run().await?;
     Ok(())
