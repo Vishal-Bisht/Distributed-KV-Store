@@ -148,6 +148,26 @@ The project includes a CLI client (`kvc`) for interacting with the cluster:
 
 **Note:** Write operations (`put`, `delete`) must be sent to the leader node. If you receive a "Not leader" error, try connecting to a different node in the cluster.
 
+### Web Dashboard
+
+A React-based dashboard is included for real-time cluster monitoring and key-value management.
+
+```bash
+cd src/dashboard
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173` to access the dashboard.
+
+**Features:**
+- Real-time cluster status with node roles and health indicators
+- Dynamic network topology visualization
+- Key-value browser with search, add, and delete functionality
+- Auto-redirects writes to the leader node
+
+See [src/dashboard/README.md](src/dashboard/README.md) for detailed documentation.
+
 ### Debug Mode
 
 To see detailed election and replication logs:
