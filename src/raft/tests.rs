@@ -8,8 +8,10 @@ async fn test_raft_election() {
     let storage = Arc::new(MemoryStorage::new());
     let (tx2, _) = mpsc::channel::<RaftMessage>(100);
     let mut peer_senders1 = HashMap::new();
+    let mut peer_addresses = HashMap::new();
     peer_senders1.insert(2, tx2);
-    let raft1 = Raft::new(1, vec![2], peer_senders1, storage);
+    peer_addresses.insert(2, "127.0.0.1:8002".to_string());
+    let raft1 = Raft::new(1, vec![2], peer_senders1, peer_addresses, "127.0.0.1:8001".to_string(), storage);
     {
         let mut state = raft1.state.write().await;
         state.role = Role::Candidate;
@@ -27,8 +29,10 @@ async fn test_log_replication() {
     let storage = Arc::new(MemoryStorage::new());
     let (tx2, _) = mpsc::channel::<RaftMessage>(100);
     let mut peer_senders = HashMap::new();
+    let mut peer_addresses = HashMap::new();
     peer_senders.insert(2, tx2);
-    let raft = Arc::new(Raft::new(1, vec![2], peer_senders, storage.clone()));
+    peer_addresses.insert(2, "127.0.0.1:8002".to_string());
+    let raft = Arc::new(Raft::new(1, vec![2], peer_senders, peer_addresses, "127.0.0.1:8001".to_string(), storage.clone()));
     
     // Make it the leader
     {

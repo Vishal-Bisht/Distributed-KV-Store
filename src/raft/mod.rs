@@ -3,9 +3,13 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, RwLock, oneshot};
 use crate::network::{RaftMessage, LogEntry, Command};
 use crate::storage::Storage;
+use crate::persist::{Persister, PersistentState, Snapshot};
 use rand::Rng;
 use std::time::Duration;
 use tokio::time::Instant;
+
+/// Threshold: compact log when it exceeds this many entries
+const LOG_COMPACTION_THRESHOLD: usize = 100;
 
 #[cfg(test)]
 mod tests;
@@ -37,8 +41,11 @@ pub struct RaftState {
     // Leader state (reinitialized after election)
     pub next_index: HashMap<u64, u64>,
     pub match_index: HashMap<u64, u64>,
-    // Known leader (for redirecting clients)
+    // Track current leader for redirects
     pub leader_id: Option<u64>,
+    // Snapshot state for log compaction
+    pub snapshot_last_index: u64,
+    pub snapshot_last_term: u64,
 }
 
 pub struct Raft<S: Storage + 'static> {
@@ -46,11 +53,11 @@ pub struct Raft<S: Storage + 'static> {
     pub message_rx: Mutex<mpsc::Receiver<RaftMessage>>,
     pub tx: mpsc::Sender<RaftMessage>,
     pub peer_senders: HashMap<u64, mpsc::Sender<RaftMessage>>,
+    pub peer_addresses: HashMap<u64, String>,
+    pub our_addr: String,
     pub storage: Arc<S>,
     pub pending_requests: Mutex<Vec<PendingRequest>>,
-    // Mapping of peer IDs to their addresses (for client redirects)
-    pub peer_addrs: HashMap<u64, String>,
-    pub self_addr: String,
+    pub persister: Option<Persister>,
 }
 
 impl<S: Storage + 'static> Raft<S> {
@@ -58,9 +65,21 @@ impl<S: Storage + 'static> Raft<S> {
         id: u64,
         peers: Vec<u64>,
         peer_senders: HashMap<u64, mpsc::Sender<RaftMessage>>,
-        peer_addrs: HashMap<u64, String>,
-        self_addr: String,
+        peer_addresses: HashMap<u64, String>,
+        our_addr: String,
         storage: Arc<S>,
+    ) -> Self {
+        Self::new_with_persistence(id, peers, peer_senders, peer_addresses, our_addr, storage, false)
+    }
+
+    pub fn new_with_persistence(
+        id: u64,
+        peers: Vec<u64>,
+        peer_senders: HashMap<u64, mpsc::Sender<RaftMessage>>,
+        peer_addresses: HashMap<u64, String>,
+        our_addr: String,
+        storage: Arc<S>,
+        enable_persistence: bool,
     ) -> Self {
         let (tx, rx) = mpsc::channel(100);
         let mut next_index = HashMap::new();
@@ -69,10 +88,40 @@ impl<S: Storage + 'static> Raft<S> {
             next_index.insert(peer_id, 1);
             match_index.insert(peer_id, 0);
         }
+
+        // Load persisted state if enabled
+        let persister: Option<Persister> = if enable_persistence {
+            match Persister::new(id) {
+                Ok(p) => Some(p),
+                Err(e) => {
+                    log::error!("Failed to create persister: {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        let (current_term, voted_for, log) = if let Some(ref p) = persister {
+            match p.load_state() {
+                Ok(ps) => {
+                    println!("Loaded persisted state: term={}, voted_for={:?}, log_len={}", 
+                             ps.current_term, ps.voted_for, ps.log.len());
+                    (ps.current_term, ps.voted_for, ps.log)
+                }
+                Err(e) => {
+                    log::error!("Failed to load state: {}", e);
+                    (0, None, Vec::new())
+                }
+            }
+        } else {
+            (0, None, Vec::new())
+        };
+
         let state = RaftState {
-            current_term: 0,
-            voted_for: None,
-            log: Vec::new(),
+            current_term,
+            voted_for,
+            log,
             commit_index: 0,
             last_applied: 0,
             role: Role::Follower,
@@ -83,16 +132,33 @@ impl<S: Storage + 'static> Raft<S> {
             next_index,
             match_index,
             leader_id: None,
+            snapshot_last_index: 0,
+            snapshot_last_term: 0,
         };
         Self {
             state: Arc::new(RwLock::new(state)),
             message_rx: Mutex::new(rx),
             tx,
             peer_senders,
+            peer_addresses,
+            our_addr,
             storage,
             pending_requests: Mutex::new(Vec::new()),
-            peer_addrs,
-            self_addr,
+            persister,
+        }
+    }
+
+    /// Save current state to disk (if persistence is enabled)
+    fn save_state_sync(&self, state: &RaftState) {
+        if let Some(ref p) = self.persister {
+            let ps = PersistentState {
+                current_term: state.current_term,
+                voted_for: state.voted_for,
+                log: state.log.clone(),
+            };
+            if let Err(e) = p.save_state(&ps) {
+                log::error!("Failed to save state: {}", e);
+            }
         }
     }
 
@@ -100,9 +166,9 @@ impl<S: Storage + 'static> Raft<S> {
     pub async fn get_leader_addr(&self) -> Option<String> {
         let state = self.state.read().await;
         if state.role == Role::Leader {
-            Some(self.self_addr.clone())
+            Some(self.our_addr.clone())
         } else if let Some(leader_id) = state.leader_id {
-            self.peer_addrs.get(&leader_id).cloned()
+            self.peer_addresses.get(&leader_id).cloned()
         } else {
             None
         }
@@ -122,6 +188,9 @@ impl<S: Storage + 'static> Raft<S> {
         state.log.push(entry);
         let log_index = state.log.len() as u64;
         
+        // Persist log change
+        self.save_state_sync(&state);
+        
         // Create channel for notifying when committed
         let (tx, rx) = oneshot::channel();
         let mut pending = self.pending_requests.lock().await;
@@ -134,7 +203,11 @@ impl<S: Storage + 'static> Raft<S> {
     }
 
     pub async fn run(&self) {
+        // Load snapshot on startup
+        self.load_snapshot().await;
+
         let mut interval = tokio::time::interval(Duration::from_millis(50));
+        let mut compaction_counter = 0u32;
         loop {
             interval.tick().await;
             self.process_messages().await;
@@ -146,6 +219,13 @@ impl<S: Storage + 'static> Raft<S> {
             }
             // Apply committed entries to storage
             self.apply_committed_entries().await;
+
+            // Check for log compaction every ~5 seconds (100 * 50ms)
+            compaction_counter += 1;
+            if compaction_counter >= 100 {
+                compaction_counter = 0;
+                self.maybe_compact_log().await;
+            }
         }
     }
 
@@ -153,9 +233,14 @@ impl<S: Storage + 'static> Raft<S> {
         let mut state = self.state.write().await;
         while state.last_applied < state.commit_index {
             state.last_applied += 1;
-            let idx = (state.last_applied - 1) as usize;
-            if idx < state.log.len() {
-                let entry = &state.log[idx];
+            // Account for snapshot offset: log index = global index - snapshot_last_index
+            let log_idx = if state.snapshot_last_index > 0 {
+                (state.last_applied - state.snapshot_last_index - 1) as usize
+            } else {
+                (state.last_applied - 1) as usize
+            };
+            if log_idx < state.log.len() {
+                let entry = &state.log[log_idx];
                 match &entry.command {
                     Command::Put { key, value } => {
                         let _ = self.storage.put(key.clone(), value.clone()).await;
@@ -234,6 +319,9 @@ impl<S: Storage + 'static> Raft<S> {
         state.votes_received.insert(id);
         state.last_heartbeat = Instant::now();
         
+        // Persist term and vote before requesting votes
+        self.save_state_sync(state);
+        
         let term = state.current_term;
         let last_log_index = state.log.len() as u64;
         let last_log_term = state.log.last().map(|e| e.term).unwrap_or(0);
@@ -285,10 +373,13 @@ impl<S: Storage + 'static> Raft<S> {
 
     async fn handle_request_vote(&self, term: u64, candidate_id: u64, last_log_index: u64, last_log_term: u64) {
         let mut state = self.state.write().await;
+        let mut state_changed = false;
+        
         if term > state.current_term {
             state.current_term = term;
             state.voted_for = None;
             state.role = Role::Follower;
+            state_changed = true;
         }
         
         // Check if candidate's log is at least as up-to-date as ours
@@ -301,10 +392,16 @@ impl<S: Storage + 'static> Raft<S> {
         let vote_granted = if term >= state.current_term && can_vote && log_ok {
             state.voted_for = Some(candidate_id);
             state.last_heartbeat = Instant::now();
+            state_changed = true;
             true
         } else {
             false
         };
+        
+        // Persist if state changed
+        if state_changed {
+            self.save_state_sync(&state);
+        }
         
         log::debug!("[Node {}] Vote request from {} (term {}): granted={} (can_vote={}, log_ok={}, voted_for={:?})", 
                  state.id, candidate_id, term, vote_granted, can_vote, log_ok, state.voted_for);
@@ -372,8 +469,13 @@ impl<S: Storage + 'static> Raft<S> {
             return;
         }
         
+        let mut state_changed = false;
+        
         // Update term and convert to follower if needed
         if term >= state.current_term {
+            if term > state.current_term {
+                state_changed = true;
+            }
             state.current_term = term;
             state.role = Role::Follower;
             state.voted_for = None;
@@ -409,10 +511,12 @@ impl<S: Storage + 'static> Raft<S> {
                 if state.log[insert_index].term != entry.term {
                     state.log.truncate(insert_index);
                     state.log.push(entry);
+                    state_changed = true;
                 }
                 // else: entry already exists with same term, skip
             } else {
                 state.log.push(entry);
+                state_changed = true;
             }
             insert_index += 1;
         }
@@ -420,6 +524,11 @@ impl<S: Storage + 'static> Raft<S> {
         // Update commit index
         if leader_commit > state.commit_index {
             state.commit_index = std::cmp::min(leader_commit, state.log.len() as u64);
+        }
+        
+        // Persist if state changed
+        if state_changed {
+            self.save_state_sync(&state);
         }
         
         let match_index = state.log.len() as u64;
@@ -489,5 +598,109 @@ impl<S: Storage + 'static> Raft<S> {
                 state.commit_index = n;
             }
         }
+    }
+
+    /// Check if log compaction is needed and perform it
+    pub async fn maybe_compact_log(&self) {
+        let state = self.state.read().await;
+        
+        // Only compact if log exceeds threshold and we have applied entries
+        if state.log.len() < LOG_COMPACTION_THRESHOLD || state.last_applied == 0 {
+            return;
+        }
+
+        // Don't compact if we haven't applied since last snapshot
+        if state.last_applied <= state.snapshot_last_index {
+            return;
+        }
+
+        drop(state);
+        self.create_snapshot().await;
+    }
+
+    /// Create a snapshot of current state and compact the log
+    async fn create_snapshot(&self) {
+        let persister = match &self.persister {
+            Some(p) => p,
+            None => return, // No persistence enabled
+        };
+
+        // First, collect all current key-value data from storage
+        let data = self.storage.get_all().await;
+        
+        let mut state = self.state.write().await;
+        let last_applied = state.last_applied as usize;
+        
+        if last_applied == 0 || last_applied > state.log.len() {
+            return;
+        }
+
+        // Get the term of the last applied entry
+        let snapshot_last_index = state.last_applied;
+        let snapshot_last_term = state.log[last_applied - 1].term;
+
+        // Create and save snapshot
+        let snapshot = Snapshot {
+            last_included_index: snapshot_last_index,
+            last_included_term: snapshot_last_term,
+            data,
+        };
+
+        if let Err(e) = persister.save_snapshot(&snapshot) {
+            log::error!("Failed to save snapshot: {}", e);
+            return;
+        }
+
+        // Compact log: remove entries up to and including last_applied
+        // Keep only entries after the snapshot
+        if last_applied < state.log.len() {
+            state.log = state.log[last_applied..].to_vec();
+        } else {
+            state.log.clear();
+        }
+
+        // Update snapshot metadata
+        state.snapshot_last_index = snapshot_last_index;
+        state.snapshot_last_term = snapshot_last_term;
+
+        // Save compacted state
+        self.save_state_sync(&state);
+
+        log::info!("[Node {}] Created snapshot at index {}, log compacted to {} entries",
+                   state.id, snapshot_last_index, state.log.len());
+    }
+
+    /// Load snapshot on startup and restore state
+    pub async fn load_snapshot(&self) -> bool {
+        let persister = match &self.persister {
+            Some(p) => p,
+            None => return false,
+        };
+
+        let snapshot = match persister.load_snapshot() {
+            Ok(Some(s)) => s,
+            Ok(None) => return false,
+            Err(e) => {
+                log::error!("Failed to load snapshot: {}", e);
+                return false;
+            }
+        };
+
+        log::info!("Loading snapshot: last_index={}, last_term={}, {} entries",
+                   snapshot.last_included_index, snapshot.last_included_term, snapshot.data.len());
+
+        // Restore data to storage
+        for (key, value) in snapshot.data {
+            let _ = self.storage.put(key, value).await;
+        }
+
+        // Update Raft state
+        let mut state = self.state.write().await;
+        state.snapshot_last_index = snapshot.last_included_index;
+        state.snapshot_last_term = snapshot.last_included_term;
+        state.last_applied = snapshot.last_included_index;
+        state.commit_index = std::cmp::max(state.commit_index, snapshot.last_included_index);
+
+        true
     }
 }
