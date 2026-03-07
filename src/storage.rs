@@ -6,6 +6,7 @@ pub trait Storage: Send + Sync {
     async fn get(&self, key: String) -> Result<Option<String>>;
     async fn put(&self, key: String, value: String) -> Result<()>;
     async fn delete(&self, key: String) -> Result<()>;
+    async fn get_all(&self) -> Vec<(String, String)>;
 }
 
 use dashmap::DashMap;
@@ -37,6 +38,10 @@ impl Storage for MemoryStorage {
     async fn delete(&self, key: String) -> Result<()> {
         self.data.remove(&key);
         Ok(())
+    }
+
+    async fn get_all(&self) -> Vec<(String, String)> {
+        self.data.iter().map(|r| (r.key().clone(), r.value().clone())).collect()
     }
 }
 
