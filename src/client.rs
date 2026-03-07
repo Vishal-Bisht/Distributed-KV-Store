@@ -15,9 +15,9 @@ impl Client {
         Self { addr }
     }
 
-    pub async fn send_request(&self, request: Request) -> Result<Response> {
-        let mut stream = TcpStream::connect(&self.addr).await?;
-        let serialized = bincode::serialize(&request)?;
+    async fn send_to(&self, addr: &str, request: &Request) -> Result<Response> {
+        let mut stream = TcpStream::connect(addr).await?;
+        let serialized = bincode::serialize(request)?;
         stream.write_all(&serialized).await?;
         let mut buffer = [0; 4096];
         let n = stream.read(&mut buffer).await?;
@@ -25,10 +25,26 @@ impl Client {
         Ok(response)
     }
 
+    /// Send request with automatic leader redirect (up to 3 retries)
+    pub async fn send_request(&self, request: Request) -> Result<Response> {
+        let mut current_addr = self.addr.clone();
+        for _ in 0..3 {
+            let response = self.send_to(&current_addr, &request).await?;
+            match &response {
+                Response::Redirect { leader_addr } => {
+                    current_addr = leader_addr.clone();
+                }
+                _ => return Ok(response),
+            }
+        }
+        Err(anyhow::anyhow!("Too many redirects"))
+    }
+
     pub async fn get(&self, key: String) -> Result<Option<String>> {
         match self.send_request(Request::Get { key }).await? {
             Response::Ok { value } => Ok(value),
             Response::Error { message } => Err(anyhow::anyhow!(message)),
+            Response::Redirect { .. } => Err(anyhow::anyhow!("Unexpected redirect")),
         }
     }
 
@@ -36,6 +52,7 @@ impl Client {
         match self.send_request(Request::Put { key, value }).await? {
             Response::Ok { .. } => Ok(()),
             Response::Error { message } => Err(anyhow::anyhow!(message)),
+            Response::Redirect { .. } => Err(anyhow::anyhow!("Unexpected redirect")),
         }
     }
 
@@ -43,6 +60,7 @@ impl Client {
         match self.send_request(Request::Delete { key }).await? {
             Response::Ok { .. } => Ok(()),
             Response::Error { message } => Err(anyhow::anyhow!(message)),
+            Response::Redirect { .. } => Err(anyhow::anyhow!("Unexpected redirect")),
         }
     }
 }

@@ -11,6 +11,7 @@ pub enum Request {
 pub enum Response {
     Ok { value: Option<String> },
     Error { message: String },
+    /// Redirect client to the leader node
     Redirect { leader_addr: String },
 }
 
@@ -126,7 +127,7 @@ async fn handle_connection<S: Storage + 'static>(
                         Response::Error { message: "Not leader".into() }
                     }
                 } else {
-                    // Return redirect to leader if known
+                    // Redirect to leader
                     if let Some(leader_addr) = raft.get_leader_addr().await {
                         Response::Redirect { leader_addr }
                     } else {
@@ -150,7 +151,7 @@ async fn handle_connection<S: Storage + 'static>(
                         Response::Error { message: "Not leader".into() }
                     }
                 } else {
-                    // Return redirect to leader if known
+                    // Redirect to leader
                     if let Some(leader_addr) = raft.get_leader_addr().await {
                         Response::Redirect { leader_addr }
                     } else {
