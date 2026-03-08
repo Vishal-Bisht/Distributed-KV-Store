@@ -9,15 +9,20 @@ param(
 
 # Get local IP address (prefers non-loopback IPv4)
 function Get-LocalIP {
-    $ip = Get-NetIPAddress -AddressFamily IPv4 | 
-          Where-Object { $_.InterfaceAlias -notmatch 'Loopback' -and $_.IPAddress -ne '127.0.0.1' } |
-          Select-Object -First 1 -ExpandProperty IPAddress
+    # First try: get IP from adapter with default gateway (most reliable)
+    $ip = (Get-NetIPConfiguration | 
+           Where-Object { $_.IPv4DefaultGateway -ne $null } | 
+           Select-Object -First 1).IPv4Address.IPAddress
     
     if (-not $ip) {
-        # Fallback: try getting IP from active adapter
-        $ip = (Get-NetIPConfiguration | 
-               Where-Object { $_.IPv4DefaultGateway -ne $null } | 
-               Select-Object -First 1).IPv4Address.IPAddress
+        # Fallback: get any non-loopback, non-link-local IPv4
+        $ip = Get-NetIPAddress -AddressFamily IPv4 | 
+              Where-Object { 
+                  $_.InterfaceAlias -notmatch 'Loopback' -and 
+                  $_.IPAddress -ne '127.0.0.1' -and 
+                  $_.IPAddress -notlike '169.254.*'  # Exclude link-local
+              } |
+              Select-Object -First 1 -ExpandProperty IPAddress
     }
     
     if (-not $ip) {
