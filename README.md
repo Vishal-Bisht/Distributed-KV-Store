@@ -6,12 +6,14 @@ A high-performance, distributed key-value store implemented in Rust, leveraging 
 
 | Command | Description |
 |---------|-------------|
-| `.\start-node.bat 1` | Start node 1 (also 2, 3) |
+| `.\start-node.bat 1` | Start node 1 locally (also 2, 3) |
+| `.\start-cluster-node.ps1 -NodeId 1` | Start node using cluster.json config |
 | `.\target\release\kv.exe -i 1 -a 127.0.0.1:8001 -p ...` | Start server manually |
 | `.\target\release\kvc.exe put key "value"` | Store a value |
 | `.\target\release\kvc.exe get key` | Retrieve a value |
 | `.\target\release\kvc.exe delete key` | Delete a key |
-| `.\target\release\kvc.exe -a 127.0.0.1:8002 get key` | Query specific node |
+| `.\target\release\kvc.exe -a 192.168.1.100:8001 get key` | Query specific node/IP |
+| `netsh advfirewall firewall add rule name="KVStore" dir=in action=allow protocol=tcp localport=8001-8003` | Allow firewall (Admin) |
 
 ## Design
 
@@ -113,17 +115,103 @@ To simulate a 3-node cluster locally, open three terminals and run the following
 .\target\release\kv.exe -i 3 -a 127.0.0.1:8003 -p 127.0.0.1:8001,127.0.0.1:8002
 ```
 
-For a cluster across different machines:
-```bash
-# Machine 1 (IP: 192.168.1.10)
-.\target\release\kv.exe -i 1 -a 0.0.0.0:8001 -p 192.168.1.20:8001,192.168.1.30:8001
+### Cross-Machine Deployment
 
-# Machine 2 (IP: 192.168.1.20)
-.\target\release\kv.exe -i 2 -a 0.0.0.0:8001 -p 192.168.1.10:8001,192.168.1.30:8001
+To run the cluster across multiple machines on the same network:
 
-# Machine 3 (IP: 192.168.1.30)
-.\target\release\kv.exe -i 3 -a 0.0.0.0:8001 -p 192.168.1.10:8001,192.168.1.20:8001
+#### Prerequisites
+
+1. **All machines must be on the same WiFi/LAN network**
+2. **Open firewall on each machine:**
+   
+   **Option A: Command Line (Run PowerShell as Administrator)**
+   ```powershell
+   netsh advfirewall firewall add rule name="KVStore" dir=in action=allow protocol=tcp localport=8001-8003
+   ```
+   
+   **Option B: Windows Firewall GUI**
+   1. Open "Windows Defender Firewall with Advanced Security" (search in Start menu)
+   2. Click "Inbound Rules" → "New Rule..."
+   3. Select "Port" → Next
+   4. Select "TCP", enter "8001-8003" → Next
+   5. Select "Allow the connection" → Next
+   6. Check all profiles (Domain, Private, Public) → Next
+   7. Name it "KVStore" → Finish
+
+3. **Get each machine's IP address:**
+   ```powershell
+   ipconfig
+   # Look for "IPv4 Address" under your WiFi adapter (e.g., 192.168.1.100)
+   ```
+
+#### Option 1: Using cluster.json (Recommended)
+
+Edit `cluster.json` on each machine. Use `"auto"` for the local node and real IPs for remote nodes.
+
+**Example: 2 machines, 3 nodes**
+- Machine A (IP: 192.168.1.100): runs Node 3
+- Machine B (IP: 192.168.1.101): runs Node 1 and Node 2
+
+**On Machine A (`cluster.json`):**
+```json
+{
+  "nodes": [
+    { "id": 1, "host": "192.168.1.101", "port": 8001, "http_port": 9001 },
+    { "id": 2, "host": "192.168.1.101", "port": 8002, "http_port": 9002 },
+    { "id": 3, "host": "auto", "port": 8003, "http_port": 9003 }
+  ]
+}
 ```
+
+**On Machine B (`cluster.json`):**
+```json
+{
+  "nodes": [
+    { "id": 1, "host": "auto", "port": 8001, "http_port": 9001 },
+    { "id": 2, "host": "auto", "port": 8002, "http_port": 9002 },
+    { "id": 3, "host": "192.168.1.100", "port": 8003, "http_port": 9003 }
+  ]
+}
+```
+
+**Start nodes:**
+```powershell
+# On Machine A
+.\start-cluster-node.ps1 -NodeId 3
+
+# On Machine B (two terminals)
+.\start-cluster-node.ps1 -NodeId 1
+.\start-cluster-node.ps1 -NodeId 2
+```
+
+#### Option 2: Manual Command Line
+
+```powershell
+# Machine A (IP: 192.168.1.100) - Node 3
+.\target\release\kv.exe -i 3 -a 192.168.1.100:8003 -p 192.168.1.101:8001,192.168.1.101:8002
+
+# Machine B (IP: 192.168.1.101) - Node 1
+.\target\release\kv.exe -i 1 -a 192.168.1.101:8001 -p 192.168.1.101:8002,192.168.1.100:8003
+
+# Machine B (IP: 192.168.1.101) - Node 2
+.\target\release\kv.exe -i 2 -a 192.168.1.101:8002 -p 192.168.1.101:8001,192.168.1.100:8003
+```
+
+#### Using the Client Cross-Machine
+
+```powershell
+# Connect to any node using its IP
+.\target\release\kvc.exe -a 192.168.1.100:8003 put mykey "hello"
+.\target\release\kvc.exe -a 192.168.1.101:8001 get mykey
+```
+
+#### Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| Connection refused | Check firewall rules, verify IPs are correct |
+| Timeout | Ensure machines are on same network |
+| "Not leader" error | Try connecting to a different node |
 
 ### Using the CLI Client
 

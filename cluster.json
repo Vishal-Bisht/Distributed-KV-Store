@@ -1,0 +1,8 @@
+{
+  "nodes": [
+    { "id": 1, "host": "auto", "port": 8001, "http_port": 9001 },
+    { "id": 2, "host": "192.168.1.101", "port": 8002, "http_port": 9002 },
+    { "id": 3, "host": "192.168.1.102", "port": 8003, "http_port": 9003 }
+  ],
+  "comment": "Set host to 'auto' to auto-detect local IP, or specify IP manually for remote nodes"
+}
